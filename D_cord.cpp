@@ -46,6 +46,7 @@ TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Dou
 
 TGraphErrors *_gr = new TGraphErrors();
 Int_t _verbose = 0;
+Int_t _event_id = 0;
 
 
 int main(int argc, char *argv[]){
@@ -366,11 +367,14 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   //
   //
   //
-
-  //  c1->cd();
-  
+  //
+  //
+  TString mg_title = csf_file;
+  mg_title += " ev_id : ";
+  mg_title += _event_id;
+  //
   TMultiGraph *mg = new TMultiGraph();
-  mg->SetTitle(csf_file.Data());
+  mg->SetTitle(mg_title.Data());
   mg->Add(gr_camera);
   //mg->Add(gr_cord);
   mg->Add(gr_reco_zero);
@@ -483,6 +487,7 @@ void read_data(TString fname, TGraphErrors *gr){
     }
     fFile.close();
   }
+  _event_id = event_id;
 }
 
 void fit_phi_dist_with_Minuit(Double_t amplitude_in, Double_t R_mirror_in, Double_t R_camera_in, Double_t rho_in, Double_t phi0_in, Double_t pedestal_in,
