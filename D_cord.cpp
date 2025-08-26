@@ -22,8 +22,32 @@
 #include "TLine.h"
 #include "TFile.h"
 #include "TH1D.h"
+#include "TH2D.h"
+#include "TVector2.h"
 
 using namespace std;
+
+struct true_info {
+  Int_t event_id;
+  Double_t x;
+  Double_t y;
+  Double_t rho;
+  Double_t phi0;
+  Double_t x_rot;
+  Double_t y_rot;
+  Double_t alpha = 90.0/180.0*TMath::Pi();
+  void get_rho_phi0(){
+    TVector2 tmpv(x,y);
+    rho = tmpv.Mod();
+    phi0 = tmpv.Phi();
+    if(phi0 > TMath::Pi())
+      phi0 = phi0 - 2*TMath::Pi();
+  }
+  void get_rot_x_y(){
+    x_rot = x*TMath::Cos(alpha) - y*TMath::Sin(alpha);
+    y_rot = x*TMath::Sin(alpha) + y*TMath::Cos(alpha);
+  }  
+};
 
 Double_t func(Double_t phi, Double_t *par);
 Double_t dcor_phi0( Double_t rho, Double_t R, Double_t phi0, Double_t phi);
@@ -38,7 +62,9 @@ void fit_phi_dist_with_Minuit(Double_t amplitude_in, Double_t R_mirror_in, Doubl
 
 
 void read_data(TString fname, TGraphErrors *gr);
+void read_ctapipe_res(TString fname, TH1D *h1, Double_t norm = 1.0);
 void read_file_list(TString fname, vector<TString> &file_list_v);
+void read_true_core_x_y(TString fname, vector<true_info> &true_info_v);
 
 Double_t *fit_and_plot(TString csf_file, TCanvas *c1);
 
@@ -47,7 +73,8 @@ TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Dou
 TGraphErrors *_gr = new TGraphErrors();
 Int_t _verbose = 0;
 Int_t _event_id = 0;
-
+bool _if_pdf_save = false;
+//bool _if_pdf_save = true;
 
 int main(int argc, char *argv[]){
   //
@@ -60,6 +87,40 @@ int main(int argc, char *argv[]){
     cout<<"inListFile "<<inListFile<<endl
 	<<"histOut    "<<histOut<<endl;
     //
+    vector<true_info> true_info_v;
+    read_true_core_x_y("true_core_x_y.csv", true_info_v);
+    //
+    TH1D *h1_true_x = new TH1D("h1_true_x","h1_true_x", 100, -10.0, 10.0);
+    TH1D *h1_true_y = new TH1D("h1_true_y","h1_true_y", 100, -10.0, 10.0);
+    TH2D *h2_true_y_vs_x = new TH2D("h2_true_y_vs_x","h2_true_y_vs_x", 100, -10.0, 10.0, 100, -10.0, 10.0);
+    TH1D *h1_true_rho = new TH1D("h1_true_rho","h1_true_rho", 100, -0.1, 10.0);
+    TH1D *h1_true_phi0 = new TH1D("h1_true_phi0","h1_true_phi0", 1000, -2.1*TMath::Pi(), 2.1*TMath::Pi());    
+    //
+    const Int_t nn_arr = 10000;
+    Int_t true_ev_id_arr[nn_arr];
+    Double_t true_x_arr[nn_arr];
+    Double_t true_y_arr[nn_arr];
+    //
+    for(Int_t j = 0; j < nn_arr; j++){
+      true_ev_id_arr[j] = -999;
+      true_x_arr[j] = -999.0;
+      true_y_arr[j] = -999.0;
+    }
+    //
+    for(unsigned int i = 0; i < true_info_v.size(); i++){
+      h1_true_x->Fill(true_info_v.at(i).x);
+      h1_true_y->Fill(true_info_v.at(i).y);
+      h1_true_rho->Fill(true_info_v.at(i).rho);
+      h1_true_phi0->Fill(true_info_v.at(i).phi0);
+      h2_true_y_vs_x->Fill(true_info_v.at(i).x, true_info_v.at(i).y);
+      if(i<nn_arr){
+	Int_t ii_event_id = (Int_t)((true_info_v.at(i).event_id)/100 - 1);
+	true_ev_id_arr[ii_event_id] = true_info_v.at(i).event_id;
+	true_x_arr[ii_event_id] = true_info_v.at(i).x_rot;
+	true_y_arr[ii_event_id] = true_info_v.at(i).y_rot;
+      }
+    }    
+    //
     vector<TString> file_list_v;
     read_file_list(inListFile, file_list_v);
     //
@@ -69,13 +130,45 @@ int main(int argc, char *argv[]){
     Double_t rho;
     Double_t phi0;
     Double_t pedestal;
+    Double_t reco_x;
+    Double_t reco_y;
     //
-    TH1D *h1_amplitude = new TH1D("h1_amplitude","h1_amplitude",100, 0.0, 30.0);
+    TH1D *h1_amplitude = new TH1D("h1_amplitude","h1_amplitude",1000, 0.0, 30.0);
     TH1D *h1_R_mirror = new TH1D("h1_R_mirror","h1_R_mirror",100, 0.0, 30.0);
     TH1D *h1_R_camera = new TH1D("h1_R_camera","h1_R_camera",100, 0.0, 10.0);
-    TH1D *h1_rho = new TH1D("h1_rho","h1_rho",100, -30.0, 30.0);
-    TH1D *h1_phi0 = new TH1D("h1_phi0","h1_phi0",50, -190.0, -190);
-    TH1D *h1_pedestal = new TH1D("h1_pedestal","h1_pedestal",50, -10.0, 10.0);
+    TH1D *h1_rho = new TH1D("h1_rho","h1_rho",1000, -30.0, 30.0);
+    TH1D *h1_reco_x = new TH1D("h1_reco_x","h1_reco_x",1000, -30.0, 30.0);
+    TH1D *h1_reco_y = new TH1D("h1_reco_y","h1_reco_y",1000, -30.0, 30.0);
+    TH2D *h2_reco_y_vs_x = new TH2D("h2_reco_y_vs_x","h2_reco_y_vs_x", 100, -10.0, 10.0, 100, -10.0, 10.0);
+    TH1D *h1_phi0 = new TH1D("h1_phi0","h1_phi0",1000, -190.0, -190);
+    TH1D *h1_pedestal = new TH1D("h1_pedestal","h1_pedestal",50, -10.0, 10.0);    
+    //
+    TH1D *h1_reco_x_m_true = new TH1D("h1_reco_x_m_true","h1_reco_x_m_true",100, -10.0, 10.0);
+    TH1D *h1_reco_y_m_true = new TH1D("h1_reco_y_m_true","h1_reco_y_m_true",100, -10.0, 10.0);
+    //
+    TH1D *h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe = new TH1D("h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe","h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe",100, -10.0, 10.0);
+    TH1D *h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe = new TH1D("h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe","h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe",100, -10.0, 10.0);
+    //
+    TH1D *h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe = new TH1D("h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe","h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe",100, -10.0, 10.0);
+    TH1D *h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe = new TH1D("h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe","h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe",100, -10.0, 10.0);
+    //
+    TH1D *h1_reco_x_m_true_CTLearn = new TH1D("h1_reco_x_m_true_CTLearn","h1_reco_x_m_true_CTLearn",100, -10.0, 10.0);
+    TH1D *h1_reco_y_m_true_CTLearn = new TH1D("h1_reco_y_m_true_CTLearn","h1_reco_y_m_true_CTLearn",100, -10.0, 10.0);
+    //
+    read_ctapipe_res("data_fixed_chord_length_hist_reco_x_m_true_x.csv",h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe, 5.5);
+    read_ctapipe_res("data_fixed_chord_length_hist_reco_y_m_true_y.csv",h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe, 5.5);
+    //
+    read_ctapipe_res("data_not_fixed_chord_length_hist_reco_x_m_true_x.csv",h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe, 5.5);
+    read_ctapipe_res("data_not_fixed_chord_length_hist_reco_y_m_true_y.csv",h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe, 5.5);
+    //
+    read_ctapipe_res("CTLearn_hist_reco_x_m_true_x.csv",h1_reco_x_m_true_CTLearn, 3.0);
+    read_ctapipe_res("CTLearn_hist_reco_y_m_true_y.csv",h1_reco_y_m_true_CTLearn, 3.0);
+    //
+    TH1D *h1_reco_x_m_true_rnd = new TH1D("h1_reco_x_m_true_rnd","h1_reco_x_m_true_rnd",400, -20.0, 20.0);
+    TH1D *h1_reco_y_m_true_rnd = new TH1D("h1_reco_y_m_true_rnd","h1_reco_y_m_true_rnd",400, -20.0, 20.0);
+    //
+    TH1D *h1_rho_m_true_rho = new TH1D("h1_rho_m_true_rho","h1_rho_m_true_rho",1000, -30.0, 30.0);
+    TH2D *h2_rho_m_true_rho_vs_true_rho = new TH2D("h2_rho_m_true_rho_vs_true_rho","h2_rho_m_true_rho_vs_true_rho",300, 0.0, 20.0, 300, -10.0, 10.0);
     //
     for(unsigned int i = 0; i < file_list_v.size(); i++){
       gStyle->SetPalette(1);
@@ -119,6 +212,42 @@ int main(int argc, char *argv[]){
       h1_rho->Fill(rho);
       h1_phi0->Fill(phi0);
       h1_pedestal->Fill(pedestal);
+      //
+      TVector2 tmpv;
+      tmpv.SetMagPhi(rho,phi0);
+      reco_x = tmpv.X();
+      reco_y = -tmpv.Y();
+      //
+      h1_reco_x->Fill(reco_x);
+      h1_reco_y->Fill(reco_y);
+      h2_reco_y_vs_x->Fill(reco_x,reco_y);
+      //
+      Int_t ii_event_id = (Int_t)(_event_id/100 - 1);
+      if(true_ev_id_arr[ii_event_id] != _event_id){
+	//true_x_arr[ii_event_id]
+	//true_y_arr[ii_event_id]
+	cout<<" ---> ERROR : true_ev_id_arr[ii_event_id] != _event_id"<<endl
+	    <<"              true_ev_id_arr[ii_event_id]  = "<<true_info_v.at(i).event_id<<endl
+	    <<"                               _event_id   = "<<_event_id<<endl;
+	assert(0);
+      }
+      else{
+	if(true_ev_id_arr[ii_event_id] == _event_id){
+	  //if(amplitude>7.8 && amplitude<8.6){
+	  //if(TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id])>5.5){
+	  h1_reco_x_m_true->Fill(reco_x - true_x_arr[ii_event_id]);
+	  h1_reco_y_m_true->Fill(reco_y - true_y_arr[ii_event_id]);
+	  h1_rho_m_true_rho->Fill(rho - TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id]));
+	  h2_rho_m_true_rho_vs_true_rho->Fill(TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id]),
+					      (rho - TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id])));
+	  //}
+	  //}
+	}
+      }
+      if(true_ev_id_arr[ii_event_id+1] != _event_id){
+	h1_reco_x_m_true_rnd->Fill(reco_x - true_x_arr[ii_event_id+1]);
+	h1_reco_y_m_true_rnd->Fill(reco_y - true_y_arr[ii_event_id+1]);
+      }
     }
     //
     //
@@ -135,12 +264,21 @@ int main(int argc, char *argv[]){
     //
     //
     //
-    //test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Double_t R_camera, Double_t rho, Double_t phi0, Double_t pedestal)
-    test_func("c1_test_func_0m", 8, 11, 1.7, 0, 0.0, 0.0)->Write();
-    test_func("c1_test_func_1m", 8, 11, 1.7, 1, 0.0, 0.0)->Write();
-    test_func("c1_test_func_2m", 8, 11, 1.7, 2, 0.0, 0.0)->Write();
-    test_func("c1_test_func_3m", 8, 11, 1.7, 3, 0.0, 0.0)->Write();
-    test_func("c1_test_func_4m", 8, 11, 1.7, 4, 0.0, 0.0)->Write();
+    //test_func( nameTitle,       amplitude, R_mirror, R_camera, rho, phi0, pedestal)
+    test_func("c1_test_func_0m",  8,         11,       1.7,      0,   0.0,  0.0)->Write();
+    test_func("c1_test_func_1m",  8,         11,       1.7,      1,   0.0,  0.0)->Write();
+    test_func("c1_test_func_2m",  8,         11,       1.7,      2,   0.0,  0.0)->Write();
+    test_func("c1_test_func_3m",  8,         11,       1.7,      3,   0.0,  0.0)->Write();
+    test_func("c1_test_func_4m",  8,         11,       1.7,      4,   0.0,  0.0)->Write();
+    test_func("c1_test_func_7m",  8,         11,       1.7,      7,   0.0,  0.0)->Write();
+    test_func("c1_test_func_11m", 8,         11,       1.7,      11,  0.0,  0.0)->Write();
+    test_func("c1_test_func_14m", 8,         11,       1.7,      14,  0.0,  0.0)->Write();
+    //
+    h1_true_x->Write();
+    h1_true_y->Write();
+    h1_true_rho->Write();
+    h1_true_phi0->Write();
+    h2_true_y_vs_x->Write();
     //
     h1_amplitude->Write();
     h1_R_mirror->Write();
@@ -148,6 +286,27 @@ int main(int argc, char *argv[]){
     h1_rho->Write();
     h1_phi0->Write();
     h1_pedestal->Write();
+    h1_reco_x->Write();
+    h1_reco_y->Write();
+    h2_reco_y_vs_x->Write();
+    //
+    h1_reco_x_m_true->Write();
+    h1_reco_y_m_true->Write();
+    //
+    h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe->Write();
+    h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe->Write();
+    //
+    h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe->Write();
+    h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe->Write();
+    //
+    h1_reco_x_m_true_CTLearn->Write();
+    h1_reco_y_m_true_CTLearn->Write();
+    //
+    h1_reco_x_m_true_rnd->Write();
+    h1_reco_y_m_true_rnd->Write();
+    h1_rho_m_true_rho->Write();
+    //
+    h2_rho_m_true_rho_vs_true_rho->Write();
     //
     rootFile->Close();
   }
@@ -165,11 +324,11 @@ int main(int argc, char *argv[]){
 
 TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Double_t R_camera, Double_t rho, Double_t phi0, Double_t pedestal){
   //
-  Int_t nn = 1000;
+  Int_t nn = 20000;
   //Double_t phi_min = -180.0;
   //Double_t phi_max = 180.0;
-  Double_t phi_min = -TMath::Pi();
-  Double_t phi_max = TMath::Pi();
+  Double_t phi_min = -10*TMath::Pi();
+  Double_t phi_max =  10*TMath::Pi();
   Double_t phi;
   //
   Double_t *par = new Double_t[6];
@@ -242,7 +401,7 @@ TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Dou
   mg->GetYaxis()->SetTitle("Integrated pixel intensity, p.e.");
   //
   mg->SetMinimum(-10.0);
-  mg->SetMaximum(220.0);
+  mg->SetMaximum(300.0);
   mg->Draw("APL");
   //
   return c1;
@@ -304,7 +463,7 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   Double_t amplitude_out, R_mirror_out, R_camera_out, rho_out, phi0_out, pedestal_out; 
   Double_t amplitude_err, R_mirror_err, R_camera_err, rho_err, phi0_err, pedestal_err; 
   
-  fit_phi_dist_with_Minuit(amplitude_zero_out, R_mirror, R_camera, rho_zero_out, phi0_zero_out, pedestal_zero_out,
+  fit_phi_dist_with_Minuit(amplitude_zero_out, R_mirror, R_camera_zero, rho_zero_out, phi0_zero_out, pedestal_zero_out,
   			   amplitude_out, R_mirror_out, R_camera_out, rho_out, phi0_out, pedestal_out,
   			   amplitude_err, R_mirror_err, R_camera_err, rho_err, phi0_err, pedestal_err);
 
@@ -387,7 +546,7 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
 
 
   mg->SetMinimum(-10.0);
-  mg->SetMaximum(220.0);
+  mg->SetMaximum(300.0);
   mg->Draw("APL");
 
   //TLine ln_phi0(phi0,0.0,phi0,210);
@@ -400,9 +559,11 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   //ln_phi0_min.SetLineColor(kGreen+2);
   //ln_phi0_min.Draw("same");
 
-  TString pdf_out = csf_file;
-  pdf_out += ".pdf";
-  c1->SaveAs(pdf_out.Data());
+  if(_if_pdf_save){
+    TString pdf_out = csf_file;
+    pdf_out += ".pdf";
+    c1->SaveAs(pdf_out.Data());
+  }
   
   return par_reco;
 }
@@ -482,7 +643,12 @@ void read_data(TString fname, TGraphErrors *gr){
     fFile>>mot>>mot>>mot;
     while(fFile>>event_id>>x>>y){
       gr->SetPoint(point_counter,x,y);
-      gr->SetPointError(point_counter,6.0*TMath::Pi()/180.0,TMath::Sqrt(y));
+      gr->SetPointError(point_counter,
+			6.0*TMath::Pi()/180.0,
+			TMath::Sqrt(y));
+      //gr->SetPointError(point_counter,
+      //		0.0*TMath::Pi()/180.0,
+      //		1000.0/TMath::Abs(y));
       point_counter++;
     }
     fFile.close();
@@ -557,6 +723,7 @@ void fcn(int &npar, double *gin, double &f, double *par, int iflag){
      x_err = _gr->GetErrorX(i);
      y_err = _gr->GetErrorY(i);
      tot_err = 1.0*TMath::Sqrt(x_err*x_err + y_err*y_err);
+     //tot_err = 1.0/TMath::Power(TMath::Sqrt(y_err*y_err + 1.0),3);
      if(y>0){
        delta = (y - func(x, par))/tot_err;
        delta *= delta;
@@ -603,6 +770,41 @@ void read_file_list(TString fname, vector<TString> &file_list_v){
   if(fFile.is_open()){
     while(fFile>>mot)
       file_list_v.push_back(mot);
+    fFile.close();
+  }
+}
+
+void read_true_core_x_y(TString fname, vector<true_info> &true_info_v){
+  string mot;
+  ifstream fFile(fname);
+  Int_t event_id;
+  Double_t x, y;
+  if(fFile.is_open()){
+    fFile>>mot>>mot>>mot;
+    while(fFile>>event_id>>x>>y){
+      true_info tmp_str;
+      tmp_str.event_id = event_id;
+      tmp_str.x = x;
+      tmp_str.y = y;
+      tmp_str.get_rho_phi0();
+      tmp_str.get_rot_x_y();
+      true_info_v.push_back(tmp_str);
+    }
+    fFile.close();
+  }
+}
+
+void read_ctapipe_res(TString fname, TH1D *h1, Double_t norm){
+  string mot;
+  ifstream fFile(fname);
+  Double_t x, y;
+  Int_t counter = 0;
+  if(fFile.is_open()){
+    fFile>>mot>>mot;
+    while(fFile>>x>>y){
+      h1->SetBinContent(counter,y/norm);
+      counter++;
+    }
     fFile.close();
   }
 }
