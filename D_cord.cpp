@@ -137,8 +137,11 @@ int main(int argc, char *argv[]){
     TH1D *h1_R_mirror = new TH1D("h1_R_mirror","h1_R_mirror",100, 0.0, 30.0);
     TH1D *h1_R_camera = new TH1D("h1_R_camera","h1_R_camera",100, 0.0, 10.0);
     TH1D *h1_rho = new TH1D("h1_rho","h1_rho",1000, -30.0, 30.0);
-    TH1D *h1_reco_x = new TH1D("h1_reco_x","h1_reco_x",1000, -30.0, 30.0);
-    TH1D *h1_reco_y = new TH1D("h1_reco_y","h1_reco_y",1000, -30.0, 30.0);
+    TH1D *h1_reco_x = new TH1D("h1_reco_x","h1_reco_x",100, -10.0, 10.0);
+    TH1D *h1_reco_y = new TH1D("h1_reco_y","h1_reco_y",100, -10.0, 10.0);
+    TH1D *h1_reco_x_ctapipe = new TH1D("h1_reco_x_ctapipe","h1_reco_x_ctapipe",100, -10.0, 10.0);
+    TH1D *h1_reco_y_ctapipe = new TH1D("h1_reco_y_ctapipe","h1_reco_y_ctapipe",100, -10.0, 10.0);
+
     TH2D *h2_reco_y_vs_x = new TH2D("h2_reco_y_vs_x","h2_reco_y_vs_x", 100, -10.0, 10.0, 100, -10.0, 10.0);
     TH1D *h1_phi0 = new TH1D("h1_phi0","h1_phi0",1000, -190.0, -190);
     TH1D *h1_pedestal = new TH1D("h1_pedestal","h1_pedestal",50, -10.0, 10.0);    
@@ -155,14 +158,17 @@ int main(int argc, char *argv[]){
     TH1D *h1_reco_x_m_true_CTLearn = new TH1D("h1_reco_x_m_true_CTLearn","h1_reco_x_m_true_CTLearn",100, -10.0, 10.0);
     TH1D *h1_reco_y_m_true_CTLearn = new TH1D("h1_reco_y_m_true_CTLearn","h1_reco_y_m_true_CTLearn",100, -10.0, 10.0);
     //
-    read_ctapipe_res("data_fixed_chord_length_hist_reco_x_m_true_x.csv",h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe, 5.5);
-    read_ctapipe_res("data_fixed_chord_length_hist_reco_y_m_true_y.csv",h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe, 5.5);
+    read_ctapipe_res("data_fixed_chord_length_hist_reco_x_m_true_x.csv",h1_fixed_chord_length_hist_reco_x_m_true_x_ctapipe);
+    read_ctapipe_res("data_fixed_chord_length_hist_reco_y_m_true_y.csv",h1_fixed_chord_length_hist_reco_y_m_true_y_ctapipe);
     //
-    read_ctapipe_res("data_not_fixed_chord_length_hist_reco_x_m_true_x.csv",h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe, 5.5);
-    read_ctapipe_res("data_not_fixed_chord_length_hist_reco_y_m_true_y.csv",h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe, 5.5);
+    read_ctapipe_res("data_not_fixed_chord_length_hist_reco_x_m_true_x.csv",h1_not_fixed_chord_length_hist_reco_x_m_true_x_ctapipe);
+    read_ctapipe_res("data_not_fixed_chord_length_hist_reco_y_m_true_y.csv",h1_not_fixed_chord_length_hist_reco_y_m_true_y_ctapipe);
     //
-    read_ctapipe_res("CTLearn_hist_reco_x_m_true_x.csv",h1_reco_x_m_true_CTLearn, 3.0);
-    read_ctapipe_res("CTLearn_hist_reco_y_m_true_y.csv",h1_reco_y_m_true_CTLearn, 3.0);
+    read_ctapipe_res("CTLearn_hist_reco_x_m_true_x.csv",h1_reco_x_m_true_CTLearn);
+    read_ctapipe_res("CTLearn_hist_reco_y_m_true_y.csv",h1_reco_y_m_true_CTLearn);
+    //
+    read_ctapipe_res("muonefficiency_impact_x_rot.csv",h1_reco_x_ctapipe,10);
+    read_ctapipe_res("muonefficiency_impact_y_rot.csv",h1_reco_y_ctapipe,10);
     //
     TH1D *h1_reco_x_m_true_rnd = new TH1D("h1_reco_x_m_true_rnd","h1_reco_x_m_true_rnd",400, -20.0, 20.0);
     TH1D *h1_reco_y_m_true_rnd = new TH1D("h1_reco_y_m_true_rnd","h1_reco_y_m_true_rnd",400, -20.0, 20.0);
@@ -288,6 +294,8 @@ int main(int argc, char *argv[]){
     h1_pedestal->Write();
     h1_reco_x->Write();
     h1_reco_y->Write();
+    h1_reco_x_ctapipe->Write();
+    h1_reco_y_ctapipe->Write();
     h2_reco_y_vs_x->Write();
     //
     h1_reco_x_m_true->Write();
@@ -421,7 +429,8 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
 
   Double_t amplitude = 10;
   Double_t R_mirror = 11.0;
-  Double_t R_camera = 1.7;
+  //Double_t R_camera = 1.7;
+  Double_t R_camera = 0.308;
   Double_t R_camera_zero = 0;
   Double_t rho = 8.0;
   Double_t phi0 = 100.0/180.0*TMath::Pi();
@@ -463,7 +472,7 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   Double_t amplitude_out, R_mirror_out, R_camera_out, rho_out, phi0_out, pedestal_out; 
   Double_t amplitude_err, R_mirror_err, R_camera_err, rho_err, phi0_err, pedestal_err; 
   
-  fit_phi_dist_with_Minuit(amplitude_zero_out, R_mirror, R_camera_zero, rho_zero_out, phi0_zero_out, pedestal_zero_out,
+  fit_phi_dist_with_Minuit(amplitude_zero_out, R_mirror, R_camera, rho_zero_out, phi0_zero_out, pedestal_zero_out,
   			   amplitude_out, R_mirror_out, R_camera_out, rho_out, phi0_out, pedestal_out,
   			   amplitude_err, R_mirror_err, R_camera_err, rho_err, phi0_err, pedestal_err);
 
