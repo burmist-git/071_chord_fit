@@ -25,3 +25,5 @@ histAll.root
 true_core_x_y.csv
 muonefficiency_impact_x_rot.csv
 muonefficiency_impact_y_rot.csv
+true_energy_core_x_y_intensity.csv
+true_energy_core_x_y_intensity.root

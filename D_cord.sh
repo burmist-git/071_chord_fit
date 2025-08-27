@@ -7,6 +7,7 @@ function printHelp {
     echo " [0] -g         : generate in file list"
     echo " [0] --g_all    : generate in file list all"
     echo " [0] --copy_all : copy all"
+    echo " [0] --cam      : cam"
     echo " [0] -c         : recompile"
     echo " [0] -h         : print help"
 }
@@ -27,6 +28,8 @@ else
 	./D_cord 0 $fileList $histOut
     elif [ "$1" = "--d_all" ]; then
 	./D_cord 0 $fileListAll $histOutAll
+    elif [ "$1" = "--cam" ]; then
+	./D_cord 1 true_energy_core_x_y_intensity.csv true_energy_core_x_y_intensity.root
     elif [ "$1" = "-g" ]; then
 	rm -rf $fileList
 	rm -rf $merg_pdf_sh

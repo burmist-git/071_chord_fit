@@ -24,6 +24,7 @@
 #include "TH1D.h"
 #include "TH2D.h"
 #include "TVector2.h"
+#include "TRandom3.h"
 
 using namespace std;
 
@@ -39,7 +40,7 @@ struct true_info {
   void get_rho_phi0(){
     TVector2 tmpv(x,y);
     rho = tmpv.Mod();
-    phi0 = tmpv.Phi();
+    phi0 = tmpv.Phi() + TMath::Pi();
     if(phi0 > TMath::Pi())
       phi0 = phi0 - 2*TMath::Pi();
   }
@@ -57,24 +58,27 @@ void fcn(int &npar, double *gin, double &f, double *par, int iflag);
 void get_initial_rho_and_phi0( Double_t R_mirror, Double_t &rho, Double_t &phi0, Double_t &phi0_min);
 
 void fit_phi_dist_with_Minuit(Double_t amplitude_in, Double_t R_mirror_in, Double_t R_camera_in, Double_t rho_in, Double_t phi0_in, Double_t pedestal_in,
+			      bool fix_amplitude, bool fix_R_mirror, bool fix_R_camera, bool fix_rho, bool fix_phi0, bool fix_pedestal,
 			      Double_t &amplitude_out, Double_t &R_mirror_out, Double_t &R_camera_out, Double_t &rho_out, Double_t &phi0_out, Double_t &pedestal_out,
 			      Double_t &amplitude_err, Double_t &R_mirror_err, Double_t &R_camera_err, Double_t &rho_err, Double_t &phi0_err, Double_t &pedestal_err);
 
+void TH2D_divide( TH2D *h2_num, TH2D *h2_denom, TH2D *h2);
+void TH1D_divide( TH1D *h1_num, TH1D *h1_denom, TH1D *h1);
 
 void read_data(TString fname, TGraphErrors *gr);
 void read_ctapipe_res(TString fname, TH1D *h1, Double_t norm = 1.0);
 void read_file_list(TString fname, vector<TString> &file_list_v);
 void read_true_core_x_y(TString fname, vector<true_info> &true_info_v);
 
-Double_t *fit_and_plot(TString csf_file, TCanvas *c1);
+Double_t *fit_and_plot(TString csf_file, TCanvas *c1, Int_t *true_ev_id_arr, Double_t *true_x_arr, Double_t *true_y_arr, Double_t *true_rho_arr, Double_t *true_phi0_arr);
 
 TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Double_t R_camera, Double_t rho, Double_t phi0, Double_t pedestal);
 
 TGraphErrors *_gr = new TGraphErrors();
 Int_t _verbose = 0;
 Int_t _event_id = 0;
-bool _if_pdf_save = false;
-//bool _if_pdf_save = true;
+//bool _if_pdf_save = false;
+bool _if_pdf_save = true;
 
 int main(int argc, char *argv[]){
   //
@@ -100,11 +104,16 @@ int main(int argc, char *argv[]){
     Int_t true_ev_id_arr[nn_arr];
     Double_t true_x_arr[nn_arr];
     Double_t true_y_arr[nn_arr];
+    Double_t true_rho_arr[nn_arr];
+    Double_t true_phi0_arr[nn_arr];
+    //
     //
     for(Int_t j = 0; j < nn_arr; j++){
       true_ev_id_arr[j] = -999;
       true_x_arr[j] = -999.0;
       true_y_arr[j] = -999.0;
+      true_rho_arr[j] = -999.0;
+      true_phi0_arr[j] = -999.0;
     }
     //
     for(unsigned int i = 0; i < true_info_v.size(); i++){
@@ -118,6 +127,8 @@ int main(int argc, char *argv[]){
 	true_ev_id_arr[ii_event_id] = true_info_v.at(i).event_id;
 	true_x_arr[ii_event_id] = true_info_v.at(i).x_rot;
 	true_y_arr[ii_event_id] = true_info_v.at(i).y_rot;
+	true_rho_arr[ii_event_id] = true_info_v.at(i).rho;
+	true_phi0_arr[ii_event_id] = true_info_v.at(i).phi0;
       }
     }    
     //
@@ -192,7 +203,14 @@ int main(int argc, char *argv[]){
       c1->SetBottomMargin(0.1);
       c1->SetGridx();
       c1->SetGridy();
-      Double_t *par_out = fit_and_plot(file_list_v.at(i),c1);
+      //
+      Double_t *par_out = fit_and_plot(file_list_v.at(i),
+				       c1,
+				       true_ev_id_arr,
+				       true_x_arr,
+				       true_y_arr,
+				       true_rho_arr,
+				       true_phi0_arr);
       delete c1;
       amplitude = par_out[0];
       R_mirror = par_out[1];
@@ -318,9 +336,113 @@ int main(int argc, char *argv[]){
     //
     rootFile->Close();
   }
+  else if(argc == 4 && atoi(argv[1]) == 1){
+    TString incsvFile = argv[2];
+    TString histOut = argv[3];
+    //
+    cout<<"incsvFile "<<incsvFile<<endl
+	<<"histOut   "<<histOut<<endl;
+    //
+    Double_t cam_l = 1.7;
+    Double_t sigma_res = 1.0;
+    Double_t mirr_w = 15;
+    Int_t nbins = 70;
+    TRandom3 *rnd = new TRandom3(1231231);
+    //    
+    //
+    TH1D *h1_e = new TH1D("h1_e","h1_e",1000, 0.0, 0.2);
+    TH1D *h1_x = new TH1D("h1_x","h1_x",1000, -mirr_w, mirr_w);
+    TH1D *h1_y = new TH1D("h1_y","h1_y",1000, -mirr_w, mirr_w);
+    TH1D *h1_intensity = new TH1D("h1_intensity","h1_intensity", 1000, 1000.0, 3000);
+    //
+    TH2D *h2_y_vs_x = new TH2D("h2_y_vs_x","h2_y_vs_x", nbins, -mirr_w, mirr_w, nbins, -mirr_w, mirr_w);
+    TH2D *h2_y_vs_x_w = new TH2D("h2_y_vs_x_w","h2_y_vs_x_w", nbins, -mirr_w, mirr_w, nbins, -mirr_w, mirr_w);
+    TH2D *h2_y_vs_x_norm = new TH2D("h2_y_vs_x_norm","h2_y_vs_x_norm", nbins, -mirr_w, mirr_w, nbins, -mirr_w, mirr_w);
+    //
+    TH1D *h1_x_cut = new TH1D("h1_x_cut","h1_x_cut", nbins, -mirr_w, mirr_w);
+    TH1D *h1_y_cut = new TH1D("h1_y_cut","h1_y_cut", nbins, -mirr_w, mirr_w);    
+    //
+    TH1D *h1_x_cut_w = new TH1D("h1_x_cut_w","h1_x_cut_w", nbins, -mirr_w, mirr_w);
+    TH1D *h1_y_cut_w = new TH1D("h1_y_cut_w","h1_y_cut_w", nbins, -mirr_w, mirr_w);    
+    //
+    TH1D *h1_x_cut_norm = new TH1D("h1_x_cut_norm","h1_x_cut_norm", nbins, -mirr_w, mirr_w);
+    TH1D *h1_y_cut_norm = new TH1D("h1_y_cut_norm","h1_y_cut_norm", nbins, -mirr_w, mirr_w);    
+    //
+    string mot;
+    ifstream fFile(incsvFile);
+    Double_t e, x, y, intensity;
+    if(fFile.is_open()){
+      fFile>>mot>>mot>>mot>>mot;
+      while(fFile>>e>>x>>y>>intensity){
+	if(intensity>2000 && intensity<2800){
+	  if(e>0.04){
+	    //
+	    x = x + rnd->Gaus(0,sigma_res);
+	    y = y + rnd->Gaus(0,sigma_res);	  
+	    //
+	    h1_e->Fill(e);
+	    h1_x->Fill(x);
+	    h1_y->Fill(y);
+	    h1_intensity->Fill(intensity);
+	    //
+	    h2_y_vs_x->Fill(x,y);
+	    h2_y_vs_x_w->Fill(x,y,intensity);
+	    //
+	    if( y >- cam_l && y < cam_l){
+	      h1_x_cut->Fill(x);
+	    h1_x_cut_w->Fill(x,intensity);
+	    }
+	    if( x >- cam_l && x < cam_l){
+	      h1_y_cut->Fill(y);
+	      h1_y_cut_w->Fill(y,intensity);
+	    }
+	    //
+	  }
+	}
+      }
+      fFile.close();
+    }
+    //
+    //
+    TH2D_divide(h2_y_vs_x_w, h2_y_vs_x, h2_y_vs_x_norm);
+    TH1D_divide(h1_x_cut_w, h1_x_cut, h1_x_cut_norm);
+    TH1D_divide(h1_y_cut_w, h1_y_cut, h1_y_cut_norm);
+    //
+    //
+    TFile* rootFile = new TFile(histOut.Data(), "RECREATE", " Histograms", 1);
+    rootFile->cd();
+    if (rootFile->IsZombie()){
+      cout<<"  ERROR ---> file "<<histOut.Data()<<" is zombi"<<endl;
+      assert(0);
+    }
+    else
+      cout<<"  Output Histos file ---> "<<histOut.Data()<<endl;
+    //
+    h1_e->Write();
+    h1_x->Write();
+    h1_y->Write();
+    h1_intensity->Write();
+    //
+    h2_y_vs_x->Write();
+    h2_y_vs_x_w->Write();
+    h2_y_vs_x_norm->Write();
+    //
+    h1_x_cut_w->Write();
+    h1_x_cut->Write();
+    h1_x_cut_norm->Write();
+    //
+    h1_y_cut_w->Write();
+    h1_y_cut->Write();
+    h1_y_cut_norm->Write();
+    //
+    rootFile->Close();
+  }
   else{
     cout<<"  runID [1] = 0        "<<endl
 	<<"        [2] - inListFile "<<endl
+    	<<"        [2] - histOut "<<endl;
+    cout<<"  runID [1] = 1        "<<endl
+	<<"        [2] - intensity true info csv file (true_energy_core_x_y_intensity.csv)"<<endl
     	<<"        [2] - histOut "<<endl;
   }  //
   finish = clock();
@@ -409,13 +531,19 @@ TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Dou
   mg->GetYaxis()->SetTitle("Integrated pixel intensity, p.e.");
   //
   mg->SetMinimum(-10.0);
-  mg->SetMaximum(300.0);
+  mg->SetMaximum(250.0);
   mg->Draw("APL");
   //
   return c1;
 }
 
-Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
+Double_t *fit_and_plot(TString csf_file,
+		       TCanvas *c1,
+		       Int_t *true_ev_id_arr,
+		       Double_t *true_x_arr,
+		       Double_t *true_y_arr,
+		       Double_t *true_rho_arr,
+		       Double_t *true_phi0_arr){
   TGraph *gr_cord = new TGraph();
   TGraph *gr_camera = new TGraph();
   gr_cord->SetNameTitle("gr_cord","gr_cord");
@@ -428,14 +556,21 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   Double_t phi;
 
   Double_t amplitude = 10;
-  Double_t R_mirror = 11.0;
-  //Double_t R_camera = 1.7;
-  Double_t R_camera = 0.308;
+  Double_t R_mirror = 12.0;
+  Double_t R_camera = 1.7;
+  //Double_t R_camera = 0.308;
   Double_t R_camera_zero = 0;
   Double_t rho = 8.0;
   Double_t phi0 = 100.0/180.0*TMath::Pi();
   Double_t phi0_min;
   Double_t pedestal = 0.0;
+
+  bool fix_amplitude = false;
+  bool fix_R_mirror = true;
+  bool fix_R_camera = true;
+  bool fix_rho = false;
+  bool fix_phi0 = false;
+  bool fix_pedestal = true;
   
   Double_t par[6];
   par[0] = amplitude;
@@ -457,9 +592,17 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   Double_t amplitude_zero_err, R_mirror_zero_err, R_camera_zero_err, rho_zero_err, phi0_zero_err, pedestal_zero_err;
   
   fit_phi_dist_with_Minuit(amplitude, R_mirror, R_camera_zero, rho, phi0, pedestal,
+			   fix_amplitude, fix_R_mirror, fix_R_camera, fix_rho, fix_phi0, fix_pedestal,
 			   amplitude_zero_out, R_mirror_zero_out, R_camera_zero_out, rho_zero_out, phi0_zero_out, pedestal_zero_out,
 			   amplitude_zero_err, R_mirror_zero_err, R_camera_zero_err, rho_zero_err, phi0_zero_err, pedestal_zero_err);
   
+
+ fix_amplitude = false;
+ fix_R_mirror = true;
+ fix_R_camera = false;
+ fix_rho = false;
+ fix_phi0 = false;
+ fix_pedestal = true;
   
   Double_t par_reco_zero[6];
   par_reco_zero[0] = amplitude_zero_out;
@@ -473,6 +616,7 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   Double_t amplitude_err, R_mirror_err, R_camera_err, rho_err, phi0_err, pedestal_err; 
   
   fit_phi_dist_with_Minuit(amplitude_zero_out, R_mirror, R_camera, rho_zero_out, phi0_zero_out, pedestal_zero_out,
+			   fix_amplitude, fix_R_mirror, fix_R_camera, fix_rho, fix_phi0, fix_pedestal,
   			   amplitude_out, R_mirror_out, R_camera_out, rho_out, phi0_out, pedestal_out,
   			   amplitude_err, R_mirror_err, R_camera_err, rho_err, phi0_err, pedestal_err);
 
@@ -493,10 +637,28 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   par_reco_camera[4] = phi0_out;
   par_reco_camera[5] = pedestal_out;
 
-  
+
+  Double_t *par_true = new Double_t[6];
+  if(_event_id == true_ev_id_arr[(_event_id/100 - 1)]){
+    par_true[0] = amplitude_out;
+    par_true[1] = R_mirror_out;
+    par_true[2] = 0.0;
+    par_true[3] = true_rho_arr[(_event_id/100 - 1)];
+    par_true[4] = true_phi0_arr[(_event_id/100 - 1)];
+    par_true[5] = pedestal_out;
+  }
+  else{
+    par_true[0] = 0.0;
+    par_true[1] = 0.0;
+    par_true[2] = 0.0;
+    par_true[3] = 0.0;
+    par_true[4] = 0.0;
+    par_true[5] = 0.0;
+  }
   
   TGraph *gr_reco = new TGraph();
   TGraph *gr_reco_zero = new TGraph();
+  TGraph *gr_true = new TGraph();
   
   for(Int_t i = 0; i<nn;i++){
     phi = phi_min + (phi_max - phi_min)/(nn-1)*i;
@@ -512,9 +674,11 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
     gr_camera->SetPoint(gr_camera->GetN(),
 			phi,
 			func( phi, par_reco_camera));
+    gr_true->SetPoint(gr_true->GetN(),
+		      phi,
+		      func( phi, par_true));
   }
 
-  
   
   //gr_reco_ring->SetMarkerStyle(7);
   gr_cord->SetMarkerStyle(7);
@@ -527,11 +691,13 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   gr_reco->SetMarkerColor(kRed+2);
   gr_reco_zero->SetMarkerStyle(7);
   gr_reco_zero->SetMarkerColor(kBlue+2);
+  gr_true->SetMarkerStyle(7);
+  gr_true->SetMarkerColor(kGreen+2);
   //
   //
   //
   gr_camera->SetMarkerStyle(7);
-  gr_camera->SetMarkerColor(kGreen+2);
+  gr_camera->SetMarkerColor(kYellow+2);
   //
   //
   //
@@ -547,6 +713,7 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
   //mg->Add(gr_cord);
   mg->Add(gr_reco_zero);
   mg->Add(gr_reco);
+  mg->Add(gr_true);
   mg->Add(_gr);
 
 
@@ -555,7 +722,7 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1){
 
 
   mg->SetMinimum(-10.0);
-  mg->SetMaximum(300.0);
+  mg->SetMaximum(250.0);
   mg->Draw("APL");
 
   //TLine ln_phi0(phi0,0.0,phi0,210);
@@ -666,6 +833,7 @@ void read_data(TString fname, TGraphErrors *gr){
 }
 
 void fit_phi_dist_with_Minuit(Double_t amplitude_in, Double_t R_mirror_in, Double_t R_camera_in, Double_t rho_in, Double_t phi0_in, Double_t pedestal_in,
+			      bool fix_amplitude, bool fix_R_mirror, bool fix_R_camera, bool fix_rho, bool fix_phi0, bool fix_pedestal,
 			      Double_t &amplitude_out, Double_t &R_mirror_out, Double_t &R_camera_out, Double_t &rho_out, Double_t &phi0_out, Double_t &pedestal_out,
 			      Double_t &amplitude_err, Double_t &R_mirror_err, Double_t &R_camera_err, Double_t &rho_err, Double_t &phi0_err, Double_t &pedestal_err){
   //
@@ -677,14 +845,35 @@ void fit_phi_dist_with_Minuit(Double_t amplitude_in, Double_t R_mirror_in, Doubl
   int ierflg = 0;
   arglist[0] = 1;
   gMinuit->mnexcm("SET ERR", arglist ,1,ierflg);
-  // 
+  //
+
+  Double_t step_amplitude = 0.001;
+  Double_t step_R_mirror = 0.00001;
+  Double_t step_R_camera = 0.00001;
+  Double_t step_rho = 0.01;
+  Double_t step_phi0 = 0.01;
+  Double_t step_pedestal = 0.00001;
+
+  if(fix_amplitude)
+    step_amplitude = 0.0;
+  if(fix_R_mirror)
+    step_R_mirror = 0.0;
+  if(fix_R_camera)
+    step_R_camera = 0.0;
+  if(fix_rho)
+    step_rho = 0.0;
+  if(fix_phi0)
+    step_phi0 = 0.0;
+  if(fix_pedestal)
+    step_pedestal = 0.0;
+  
   // Set starting values and step sizes for parameters
-  gMinuit->mnparm(0, "A", amplitude_in, 0.001, 0,0,ierflg);
-  gMinuit->mnparm(1, "R_m", R_mirror_in, 0.0, 0,0,ierflg);
-  gMinuit->mnparm(2, "R_c", R_camera_in, 0.0, 0,0,ierflg);
-  gMinuit->mnparm(3, "rho", rho_in, 0.01, 0,0,ierflg);
-  gMinuit->mnparm(4, "phi0", phi0_in, 0.01, 0,0,ierflg);
-  gMinuit->mnparm(5, "pedestal", pedestal_in, 0.0, 0,0,ierflg);
+  gMinuit->mnparm(0,        "A", amplitude_in, step_amplitude, 0, 0, ierflg);
+  gMinuit->mnparm(1,      "R_m",  R_mirror_in, step_R_mirror, 0, 0, ierflg);
+  gMinuit->mnparm(2,      "R_c",  R_camera_in, step_R_camera, 0, 0, ierflg);
+  gMinuit->mnparm(3,      "rho",       rho_in, step_rho, 0, 0, ierflg);
+  gMinuit->mnparm(4,     "phi0",      phi0_in, step_phi0, 0, 0, ierflg);
+  gMinuit->mnparm(5, "pedestal",  pedestal_in, step_pedestal, 0, 0, ierflg);
   //  
   // Now ready for minimization step
   arglist[0] = 50000;
@@ -815,5 +1004,37 @@ void read_ctapipe_res(TString fname, TH1D *h1, Double_t norm){
       counter++;
     }
     fFile.close();
+  }
+}
+
+void TH2D_divide( TH2D *h2_num, TH2D *h2_denom, TH2D *h2){
+  Double_t numerator;
+  Double_t denomirator;
+  Double_t val_norm;
+  for(Int_t i = 1;i<=h2_num->GetNbinsX();i++){
+    for(Int_t j = 1;j<=h2_num->GetNbinsY();j++){
+      numerator = h2_num->GetBinContent(i,j);
+      denomirator = h2_denom->GetBinContent(i,j);
+      if(denomirator>0)
+        val_norm = numerator/denomirator;
+      else
+        val_norm = 0.0;
+      h2->SetBinContent(i,j,val_norm);
+    }
+  }
+}
+
+void TH1D_divide( TH1D *h1_num, TH1D *h1_denom, TH1D *h1){
+  Double_t numerator;
+  Double_t denomirator;
+  Double_t val_norm;
+  for(Int_t i = 1;i<=h1_num->GetNbinsX();i++){
+    numerator = h1_num->GetBinContent(i);
+    denomirator = h1_denom->GetBinContent(i);
+    if(denomirator>0)
+      val_norm = numerator/denomirator;
+    else
+      val_norm = 0.0;
+    h1->SetBinContent(i,val_norm);
   }
 }
