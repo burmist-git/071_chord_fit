@@ -34,9 +34,10 @@ struct true_info {
   Double_t y;
   Double_t rho;
   Double_t phi0;
-  Double_t x_rot;
-  Double_t y_rot;
-  Double_t alpha = 90.0/180.0*TMath::Pi();
+  //Double_t x_rot;
+  //Double_t y_rot;
+  //Double_t alpha = 90.0/180.0*TMath::Pi();
+  Double_t alpha = 0.0/180.0*TMath::Pi();
   void get_rho_phi0(){
     TVector2 tmpv(x,y);
     rho = tmpv.Mod();
@@ -44,12 +45,13 @@ struct true_info {
     if(phi0 > TMath::Pi())
       phi0 = phi0 - 2*TMath::Pi();
   }
-  void get_rot_x_y(){
-    x_rot = x*TMath::Cos(alpha) - y*TMath::Sin(alpha);
-    y_rot = x*TMath::Sin(alpha) + y*TMath::Cos(alpha);
-  }  
+  //void get_rot_x_y(){
+  //x_rot = x*TMath::Cos(alpha) - y*TMath::Sin(alpha);
+  //y_rot = x*TMath::Sin(alpha) + y*TMath::Cos(alpha);
+  //}  
 };
 
+bool if_not_camera(Double_t phi, Double_t *par);
 Double_t func(Double_t phi, Double_t *par);
 Double_t dcor_phi0( Double_t rho, Double_t R, Double_t phi0, Double_t phi);
 Double_t dcor( Double_t rho, Double_t R, Double_t phi);
@@ -74,11 +76,16 @@ Double_t *fit_and_plot(TString csf_file, TCanvas *c1, Int_t *true_ev_id_arr, Dou
 
 TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Double_t R_camera, Double_t rho, Double_t phi0, Double_t pedestal);
 
+Double_t convert_phi_zero_twopi_to_mpi_pi(Double_t phi);
+Double_t shadowing_importance(Double_t rho);
+
 TGraphErrors *_gr = new TGraphErrors();
 Int_t _verbose = 0;
 Int_t _event_id = 0;
-//bool _if_pdf_save = false;
-bool _if_pdf_save = true;
+bool _if_pdf_save = false;
+//bool _if_pdf_save = true;
+Double_t _R_mirror = 12.0;
+Double_t _R_camera = 0.0;
 
 int main(int argc, char *argv[]){
   //
@@ -125,8 +132,8 @@ int main(int argc, char *argv[]){
       if(i<nn_arr){
 	Int_t ii_event_id = (Int_t)((true_info_v.at(i).event_id)/100 - 1);
 	true_ev_id_arr[ii_event_id] = true_info_v.at(i).event_id;
-	true_x_arr[ii_event_id] = true_info_v.at(i).x_rot;
-	true_y_arr[ii_event_id] = true_info_v.at(i).y_rot;
+	true_x_arr[ii_event_id] = true_info_v.at(i).x;
+	true_y_arr[ii_event_id] = true_info_v.at(i).y;
 	true_rho_arr[ii_event_id] = true_info_v.at(i).rho;
 	true_phi0_arr[ii_event_id] = true_info_v.at(i).phi0;
       }
@@ -140,13 +147,17 @@ int main(int argc, char *argv[]){
     Double_t R_camera;
     Double_t rho;
     Double_t phi0;
+    Double_t phi0_rot;
     Double_t pedestal;
     Double_t reco_x;
     Double_t reco_y;
+    Double_t reco_x_rot;
+    Double_t reco_y_rot;
+    Double_t alpha_rot = 0.0/180.0*TMath::Pi();
     //
     TH1D *h1_amplitude = new TH1D("h1_amplitude","h1_amplitude",1000, 0.0, 30.0);
-    TH1D *h1_R_mirror = new TH1D("h1_R_mirror","h1_R_mirror",100, 0.0, 30.0);
-    TH1D *h1_R_camera = new TH1D("h1_R_camera","h1_R_camera",100, 0.0, 10.0);
+    TH1D *h1_R_mirror = new TH1D("h1_R_mirror","h1_R_mirror",1000, 0.0, 30.0);
+    TH1D *h1_R_camera = new TH1D("h1_R_camera","h1_R_camera",1000, 0.0, 10.0);
     TH1D *h1_rho = new TH1D("h1_rho","h1_rho",1000, -30.0, 30.0);
     TH1D *h1_reco_x = new TH1D("h1_reco_x","h1_reco_x",100, -10.0, 10.0);
     TH1D *h1_reco_y = new TH1D("h1_reco_y","h1_reco_y",100, -10.0, 10.0);
@@ -155,6 +166,7 @@ int main(int argc, char *argv[]){
 
     TH2D *h2_reco_y_vs_x = new TH2D("h2_reco_y_vs_x","h2_reco_y_vs_x", 100, -10.0, 10.0, 100, -10.0, 10.0);
     TH1D *h1_phi0 = new TH1D("h1_phi0","h1_phi0",1000, -190.0, -190);
+    TH1D *h1_phi0_rot = new TH1D("h1_phi0_rot","h1_phi0_rot",1000, -190.0, -190);
     TH1D *h1_pedestal = new TH1D("h1_pedestal","h1_pedestal",50, -10.0, 10.0);    
     //
     TH1D *h1_reco_x_m_true = new TH1D("h1_reco_x_m_true","h1_reco_x_m_true",100, -10.0, 10.0);
@@ -186,6 +198,27 @@ int main(int argc, char *argv[]){
     //
     TH1D *h1_rho_m_true_rho = new TH1D("h1_rho_m_true_rho","h1_rho_m_true_rho",1000, -30.0, 30.0);
     TH2D *h2_rho_m_true_rho_vs_true_rho = new TH2D("h2_rho_m_true_rho_vs_true_rho","h2_rho_m_true_rho_vs_true_rho",300, 0.0, 20.0, 300, -10.0, 10.0);
+    //
+    TH2D *h2_x_vs_true_x = new TH2D("h2_x_vs_true_x","h2_x_vs_true_x",300, -10.0, 10.0, 300, -10.0, 10.0);
+    TH2D *h2_y_vs_true_y = new TH2D("h2_y_vs_true_y","h2_y_vs_true_y",300, -10.0, 10.0, 300, -10.0, 10.0);
+    TH2D *h2_rho_vs_true_rho = new TH2D("h2_rho_vs_true_rho","h2_rho_vs_true_rho",300, 0.0, 10.0, 300, 0.0, 10.0);
+    TH2D *h2_phi0_vs_true_phi0 = new TH2D("h2_phi0_vs_true_phi0","h2_phi0_vs_true_phi0",400, -360.0, 360.0, 400, -360.0, 360.0);    
+    //
+    Double_t mirr_w = 15;
+    Int_t nbins = 70;
+    //
+    TH2D *h2_y_vs_x = new TH2D("h2_y_vs_x","h2_y_vs_x", nbins, -mirr_w, mirr_w, nbins, -mirr_w, mirr_w);
+    TH2D *h2_y_vs_x_w = new TH2D("h2_y_vs_x_w","h2_y_vs_x_w", nbins, -mirr_w, mirr_w, nbins, -mirr_w, mirr_w);
+    TH2D *h2_y_vs_x_norm = new TH2D("h2_y_vs_x_norm","h2_y_vs_x_norm", nbins, -mirr_w, mirr_w, nbins, -mirr_w, mirr_w);
+    //
+    TH1D *h1_x_cut = new TH1D("h1_x_cut","h1_x_cut", nbins, -mirr_w, mirr_w);
+    TH1D *h1_y_cut = new TH1D("h1_y_cut","h1_y_cut", nbins, -mirr_w, mirr_w);    
+    //
+    TH1D *h1_x_cut_w = new TH1D("h1_x_cut_w","h1_x_cut_w", nbins, -mirr_w, mirr_w);
+    TH1D *h1_y_cut_w = new TH1D("h1_y_cut_w","h1_y_cut_w", nbins, -mirr_w, mirr_w);    
+    //
+    TH1D *h1_x_cut_norm = new TH1D("h1_x_cut_norm","h1_x_cut_norm", nbins, -mirr_w, mirr_w);
+    TH1D *h1_y_cut_norm = new TH1D("h1_y_cut_norm","h1_y_cut_norm", nbins, -mirr_w, mirr_w);    
     //
     for(unsigned int i = 0; i < file_list_v.size(); i++){
       gStyle->SetPalette(1);
@@ -237,14 +270,38 @@ int main(int argc, char *argv[]){
       h1_phi0->Fill(phi0);
       h1_pedestal->Fill(pedestal);
       //
-      TVector2 tmpv;
-      tmpv.SetMagPhi(rho,phi0);
-      reco_x = tmpv.X();
-      reco_y = -tmpv.Y();
+      //tmpv.SetMagPhi(rho,phi0);
+      //reco_x = tmpv.X();
+      //reco_y = -tmpv.Y();
+      //reco_x = rho * TMath::Cos(phi0);
+      //reco_y = rho * TMath::Sin(phi0);
+      reco_x = -rho * TMath::Sin(phi0);
+      reco_y = -rho * TMath::Cos(phi0);
+      reco_x_rot = reco_x * TMath::Cos(alpha_rot) - reco_y * TMath::Sin(alpha_rot);
+      reco_y_rot = reco_x * TMath::Sin(alpha_rot) + reco_y * TMath::Cos(alpha_rot);      
+      TVector2 tmpv(reco_x_rot, reco_y_rot);
+      //phi0_rot = -convert_phi_zero_twopi_to_mpi_pi(tmpv.Phi());
+      phi0_rot = tmpv.Phi() - TMath::Pi();
+      h1_phi0_rot->Fill(phi0_rot);
+      //
+      h2_y_vs_x->Fill(reco_x,reco_y);
+      h2_y_vs_x_w->Fill(reco_x,reco_y,amplitude);
       //
       h1_reco_x->Fill(reco_x);
       h1_reco_y->Fill(reco_y);
       h2_reco_y_vs_x->Fill(reco_x,reco_y);
+      //
+      //
+      if( reco_y > -1.5 && reco_y < 1.5){
+	h1_x_cut->Fill(reco_x);
+	h1_x_cut_w->Fill(reco_x,amplitude);
+      }
+      if( reco_x > -1.5 && reco_x < 1.5){
+	h1_y_cut->Fill(reco_y);
+	h1_y_cut_w->Fill(reco_y,amplitude);
+      }
+      //
+      
       //
       Int_t ii_event_id = (Int_t)(_event_id/100 - 1);
       if(true_ev_id_arr[ii_event_id] != _event_id){
@@ -259,11 +316,15 @@ int main(int argc, char *argv[]){
 	if(true_ev_id_arr[ii_event_id] == _event_id){
 	  //if(amplitude>7.8 && amplitude<8.6){
 	  //if(TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id])>5.5){
-	  h1_reco_x_m_true->Fill(reco_x - true_x_arr[ii_event_id]);
-	  h1_reco_y_m_true->Fill(reco_y - true_y_arr[ii_event_id]);
-	  h1_rho_m_true_rho->Fill(rho - TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id]));
-	  h2_rho_m_true_rho_vs_true_rho->Fill(TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id]),
-					      (rho - TMath::Sqrt(true_x_arr[ii_event_id]*true_x_arr[ii_event_id] + true_y_arr[ii_event_id]*true_y_arr[ii_event_id])));
+	  h1_reco_x_m_true->Fill(reco_x_rot - true_x_arr[ii_event_id]);
+	  h1_reco_y_m_true->Fill(reco_y_rot - true_y_arr[ii_event_id]);
+	  h1_rho_m_true_rho->Fill(rho - true_rho_arr[ii_event_id]);
+	  h2_rho_m_true_rho_vs_true_rho->Fill(true_rho_arr[ii_event_id],rho - true_rho_arr[ii_event_id]);
+	  //
+	  h2_x_vs_true_x->Fill(true_x_arr[ii_event_id], reco_x_rot);
+	  h2_y_vs_true_y->Fill(true_y_arr[ii_event_id], reco_y_rot);
+	  h2_rho_vs_true_rho->Fill(true_rho_arr[ii_event_id], rho);
+	  h2_phi0_vs_true_phi0->Fill(true_phi0_arr[ii_event_id]*180.0/TMath::Pi(), phi0_rot*180.0/TMath::Pi());
 	  //}
 	  //}
 	}
@@ -273,6 +334,12 @@ int main(int argc, char *argv[]){
 	h1_reco_y_m_true_rnd->Fill(reco_y - true_y_arr[ii_event_id+1]);
       }
     }
+    //
+    //
+    //
+    TH2D_divide(h2_y_vs_x_w, h2_y_vs_x, h2_y_vs_x_norm);
+    TH1D_divide(h1_x_cut_w, h1_x_cut, h1_x_cut_norm);
+    TH1D_divide(h1_y_cut_w, h1_y_cut, h1_y_cut_norm);
     //
     //
     //
@@ -309,6 +376,7 @@ int main(int argc, char *argv[]){
     h1_R_camera->Write();
     h1_rho->Write();
     h1_phi0->Write();
+    h1_phi0_rot->Write();
     h1_pedestal->Write();
     h1_reco_x->Write();
     h1_reco_y->Write();
@@ -333,6 +401,23 @@ int main(int argc, char *argv[]){
     h1_rho_m_true_rho->Write();
     //
     h2_rho_m_true_rho_vs_true_rho->Write();
+    //
+    h2_x_vs_true_x->Write();
+    h2_y_vs_true_y->Write();
+    h2_rho_vs_true_rho->Write();
+    h2_phi0_vs_true_phi0->Write();
+    //
+    //
+    h1_x_cut->Write();
+    h1_x_cut_w->Write();
+    h1_y_cut->Write();
+    h1_y_cut_w->Write();
+    h1_x_cut_norm->Write();
+    h1_y_cut_norm->Write();
+    h2_y_vs_x_w->Write();
+    h2_y_vs_x->Write();
+    h2_y_vs_x_norm->Write();
+    //
     //
     rootFile->Close();
   }
@@ -390,7 +475,7 @@ int main(int argc, char *argv[]){
 	    //
 	    if( y >- cam_l && y < cam_l){
 	      h1_x_cut->Fill(x);
-	    h1_x_cut_w->Fill(x,intensity);
+	      h1_x_cut_w->Fill(x,intensity);
 	    }
 	    if( x >- cam_l && x < cam_l){
 	      h1_y_cut->Fill(y);
@@ -531,7 +616,7 @@ TCanvas *test_func(TString nameTitle, Double_t amplitude, Double_t R_mirror, Dou
   mg->GetYaxis()->SetTitle("Integrated pixel intensity, p.e.");
   //
   mg->SetMinimum(-10.0);
-  mg->SetMaximum(250.0);
+  mg->SetMaximum(400.0);
   mg->Draw("APL");
   //
   return c1;
@@ -556,9 +641,14 @@ Double_t *fit_and_plot(TString csf_file,
   Double_t phi;
 
   Double_t amplitude = 10;
-  Double_t R_mirror = 12.0;
-  Double_t R_camera = 1.7;
+  //
+  Double_t R_mirror = _R_mirror;
+  Double_t R_camera = _R_camera;
+  //Double_t R_mirror = 12.0;
+  //Double_t R_camera = 1.7;
   //Double_t R_camera = 0.308;
+  //Double_t R_camera = 0.0;
+  //
   Double_t R_camera_zero = 0;
   Double_t rho = 8.0;
   Double_t phi0 = 100.0/180.0*TMath::Pi();
@@ -599,7 +689,7 @@ Double_t *fit_and_plot(TString csf_file,
 
  fix_amplitude = false;
  fix_R_mirror = true;
- fix_R_camera = false;
+ fix_R_camera = true;
  fix_rho = false;
  fix_phi0 = false;
  fix_pedestal = true;
@@ -638,13 +728,30 @@ Double_t *fit_and_plot(TString csf_file,
   par_reco_camera[5] = pedestal_out;
 
 
+  //
+  //
+  //    reco_x = -rho * TMath::Sin(phi0);
+  //    reco_y = -rho * TMath::Cos(phi0);
+  //    reco_x_rot = reco_x * TMath::Cos(alpha_rot) - reco_y * TMath::Sin(alpha_rot);
+  //    reco_y_rot = reco_x * TMath::Sin(alpha_rot) + reco_y * TMath::Cos(alpha_rot);      
+  //    TVector2 tmpv(reco_x_rot, reco_y_rot);
+  //    //phi0_rot = -convert_phi_zero_twopi_to_mpi_pi(tmpv.Phi());
+  //    phi0_rot = tmpv.Phi() - TMath::Pi();
+  //    h1_phi0_rot->Fill(phi0_rot);
+  //
+  // 
   Double_t *par_true = new Double_t[6];
   if(_event_id == true_ev_id_arr[(_event_id/100 - 1)]){
     par_true[0] = amplitude_out;
     par_true[1] = R_mirror_out;
     par_true[2] = 0.0;
     par_true[3] = true_rho_arr[(_event_id/100 - 1)];
-    par_true[4] = true_phi0_arr[(_event_id/100 - 1)];
+    ////////////////////////
+    Double_t tmp_x = -true_rho_arr[(_event_id/100 - 1)] * TMath::Sin(true_phi0_arr[(_event_id/100 - 1)]);
+    Double_t tmp_y = -true_rho_arr[(_event_id/100 - 1)] * TMath::Cos(true_phi0_arr[(_event_id/100 - 1)]);
+    TVector2 tmpv(tmp_x, tmp_y);
+    par_true[4] = tmpv.Phi() - TMath::Pi();
+    ////////////////////////
     par_true[5] = pedestal_out;
   }
   else{
@@ -722,7 +829,7 @@ Double_t *fit_and_plot(TString csf_file,
 
 
   mg->SetMinimum(-10.0);
-  mg->SetMaximum(250.0);
+  mg->SetMaximum(400.0);
   mg->Draw("APL");
 
   //TLine ln_phi0(phi0,0.0,phi0,210);
@@ -744,6 +851,21 @@ Double_t *fit_and_plot(TString csf_file,
   return par_reco;
 }
 
+Double_t shadowing_importance(Double_t rho){
+  //Double_t L_eff = _R_camera*2.0;
+  //Double_t importance = 1.0;
+  //if(rho>=L_eff)
+  //return 0.0;
+  //return importance - importance/L_eff * rho;
+  //
+  //Double_t L_eff = _R_camera*2.0;
+  //Double_t importance = 1.0;
+  //if(rho>=L_eff)
+  //return importance;
+  //return importance/L_eff * rho;
+  return 1.0;
+}
+
 Double_t func(Double_t phi, Double_t *par){
   Double_t amplitude = par[0];
   Double_t R_mirror = par[1];
@@ -752,7 +874,21 @@ Double_t func(Double_t phi, Double_t *par){
   Double_t phi0 = par[4];
   Double_t pedestal = par[5];
   //Double_t pedestal = 0.0;
-  return amplitude*(dcor_phi0( rho, R_mirror, phi0, phi) - dcor_phi0( rho, R_camera, phi0, phi)) + pedestal;
+  //Double_t _R_mirror = 12.0;
+  //Double_t _R_camera = 1.7;
+  return amplitude*dcor_phi0( rho, R_mirror, phi0, phi) - amplitude*shadowing_importance(rho)*dcor_phi0( rho, R_camera, phi0, phi) + pedestal;
+}
+
+bool if_not_camera(Double_t phi, Double_t *par){
+  //Double_t amplitude = par[0];
+  //Double_t R_mirror = par[1];
+  Double_t R_camera = par[2];
+  Double_t rho = par[3];
+  Double_t phi0 = par[4];
+  //Double_t pedestal = par[5];
+  if(dcor_phi0( rho, R_camera, phi0, phi)>0.0)
+    return false;
+  return true;
 }
 
 Double_t dcor_phi0( Double_t rho, Double_t R, Double_t phi0, Double_t phi){
@@ -921,8 +1057,10 @@ void fcn(int &npar, double *gin, double &f, double *par, int iflag){
      x_err = _gr->GetErrorX(i);
      y_err = _gr->GetErrorY(i);
      tot_err = 1.0*TMath::Sqrt(x_err*x_err + y_err*y_err);
+     //if(!if_not_camera(x, par))
+     //tot_err = tot_err*100000.0;
      //tot_err = 1.0/TMath::Power(TMath::Sqrt(y_err*y_err + 1.0),3);
-     if(y>0){
+     if( y > 0 ){
        delta = (y - func(x, par))/tot_err;
        delta *= delta;
        chisq += delta;
@@ -985,7 +1123,7 @@ void read_true_core_x_y(TString fname, vector<true_info> &true_info_v){
       tmp_str.x = x;
       tmp_str.y = y;
       tmp_str.get_rho_phi0();
-      tmp_str.get_rot_x_y();
+      //tmp_str.get_rot_x_y();
       true_info_v.push_back(tmp_str);
     }
     fFile.close();
@@ -1037,4 +1175,10 @@ void TH1D_divide( TH1D *h1_num, TH1D *h1_denom, TH1D *h1){
       val_norm = 0.0;
     h1->SetBinContent(i,val_norm);
   }
+}
+
+Double_t convert_phi_zero_twopi_to_mpi_pi(Double_t phi){
+  if(phi>=0 && phi<=TMath::Pi())
+    return phi;
+  return phi - 2.0*TMath::Pi();
 }
